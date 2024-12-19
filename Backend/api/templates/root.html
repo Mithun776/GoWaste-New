@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <hr>
+    <pre>
+    {% for key,value in data.items %}
+    '{{key}}' :
+        {% for k,v in value.items %}
+        {% if not v.items%}{{k}} : {{v}}
+        {% else %}{{k}} : { {% for i,j in v.items %}
+            "{{i}}" : "{{j}}"{% endfor %}
+        }
+        {% endif %}{% endfor %}
+    <hr>{% endfor %}
+    </pre>
+</body>
+</html>

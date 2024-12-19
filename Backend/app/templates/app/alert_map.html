@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+    {% load static %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alert Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .control-panel {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+        .route-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <button id="generateAlerts" onclick="generateTestAlerts()">TEST - Create Alerts</button>
+        <button id="clearRoutes" onclick="clearAllRoutes()">Clear Routes</button>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div class="control-panel">
+        <h2>Create New Alert</h2>
+        <form id="alertForm">
+            <label for="alert_type">Alert Type:</label>
+            <select id="alert_type" required>
+                <option value="">Select an alert type</option>
+            </select>
+            <br>
+            <label for="token">User Token:</label>
+            <input type="text" id="token" required>
+            <input type="hidden" id="latitude">
+            <input type="hidden" id="longitude">
+            <button type="submit">Create Alert</button>
+        </form>
+    </div>
+    
+    <div id="routeInfo" class="route-info" style="display: none;">
+        <h3>Vehicle Route</h3>
+        <div id="routeDetails"></div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Get configuration from Django template context
+        const ROUTE_UPDATE_INTERVAL = {{ FRONTEND_ROUTE_UPDATE_INTERVAL }};
+        const LOCATION_UPDATE_INTERVAL = {{ FRONTEND_LOCATION_UPDATE_INTERVAL }};
+        
+        var bengaluruCoordinates = [12.9716, 77.5946];
+        var map = L.map('map').setView(bengaluruCoordinates, 12);
+        var markers = [];
+        var routeLayers = [];
+        var vehicleRoutes = {};
+        
+        // Icons
+        var vehicleIcon = L.icon({
+            iconUrl: "{% static 'app/green-marker.png' %}",
+            iconSize: [25, 31],
+            iconAnchor: [12, 31],
+            popupAnchor: [1, -24],
+        });
+
+        var alertIcon = L.icon({
+            iconUrl: '{% static "app/red-marker.png" %}',
+            iconSize: [25, 31],
+            iconAnchor: [12, 31],
+            popupAnchor: [1, -24],
+        });
+
+        var collectionPointIcon = L.icon({
+            iconUrl: '{% static "app/blue-marker.png" %}',
+            iconSize: [25, 31],
+            iconAnchor: [12, 31],
+            popupAnchor: [1, -24],
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: ' OpenStreetMap'
+        }).addTo(map);
+
+        var marker;
+
+        // Global variables to store assignments
+        let vehicleAssignments = {};
+        let alertAssignments = {};
+
+        // Function to generate test alerts
+        function generateTestAlerts() {
+            fetch('/generate-test-alerts/', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Generated 20 test alerts successfully!');
+                    updateLocations(); // Refresh the map
+                } else {
+                    alert('Error generating alerts: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error generating alerts');
+            });
+        }
+
+        // Function to show route for a vehicle
+        function showVehicleRoute(vehicleId) {
+            // Clear existing routes
+            clearAllRoutes();
+            
+            fetch(`/get-vehicle-route/${vehicleId}/`)
+            .then(response => response.json())
+            .then(data => {
+                const route = data.route;
+                if (!route || route.length === 0) {
+                    alert('No alerts assigned to this vehicle');
+                    return;
+                }
+
+                // Draw the route
+                routeLayers = drawRoute(route);
+
+                // Show route information
+                let routeInfo = document.getElementById('routeInfo');
+                let routeDetails = document.getElementById('routeDetails');
+                routeInfo.style.display = 'block';
+                
+                // Build route details HTML
+                let detailsHtml = '<ol>';
+                route.forEach((point, index) => {
+                    if (point.type === 'vehicle_start') {
+                        detailsHtml += `<li><strong>Start from Vehicle Location</strong></li>`;
+                    } else if (point.type === 'alert') {
+                        detailsHtml += `<li><strong>Pickup ${point.alert_type} waste</strong><br>`;
+                        if (point.instructions && point.instructions.length > 0) {
+                            detailsHtml += '<ul class="instructions">';
+                            point.instructions.forEach(instruction => {
+                                detailsHtml += `<li>${instruction}</li>`;
+                            });
+                            detailsHtml += '</ul>';
+                        }
+                        detailsHtml += '</li>';
+                    } else if (point.type === 'collection_point') {
+                        detailsHtml += `<li><strong>Drop at Collection Point</strong></li>`;
+                    }
+                });
+                detailsHtml += '</ol>';
+                routeDetails.innerHTML = detailsHtml;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error fetching route');
+            });
+        }
+
+        // Function to clear all routes
+        function clearAllRoutes() {
+            routeLayers.forEach(layer => map.removeLayer(layer));
+            routeLayers = [];
+            document.getElementById('routeInfo').style.display = 'none';
+        }
+
+        // Function to update locations
+        function updateLocations() {
+            fetch('/api/get-status/')
+                .then(response => response.json())
+                .then(data => {
+                    // Clear existing markers
+                    markers.forEach(m => map.removeLayer(m));
+                    markers = [];
+
+                    // Add vehicles
+                    data.vehicles.forEach(vehicle => {
+                        var locMarker = L.marker([vehicle.latitude, vehicle.longitude], { icon: vehicleIcon })
+                            .addTo(map);
+                        markers.push(locMarker);
+
+                        // Add click handler for route visualization
+                        locMarker.on('click', () => showVehicleRoute(vehicle.id));
+
+                        // Show info on hover
+                        locMarker.bindPopup(`Vehicle ${vehicle.vehicle_registration}`);
+                    });
+
+                    // Add alerts
+                    data.alerts.forEach(alert => {
+                        var locMarker = L.marker([alert.latitude, alert.longitude], { icon: alertIcon })
+                            .addTo(map);
+                        markers.push(locMarker);
+
+                        // Show info on hover
+                        locMarker.bindPopup(`Alert: ${alert.alert_type}`);
+                        
+                        // Add click handler to show route from assigned vehicle
+                        locMarker.on('click', () => {
+                            // Find assigned vehicle and show its route
+                            for (let vehicleId in vehicleAssignments) {
+                                if (vehicleAssignments[vehicleId].includes(alert.id)) {
+                                    showVehicleRoute(vehicleId);
+                                    break;
+                                }
+                            }
+                        });
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching locations:', error);
+                });
+        }
+
+        map.on('click', function(e) {
+            if (marker) {
+                map.removeLayer(marker);
+            }
+            marker = L.marker(e.latlng).addTo(map);
+            document.getElementById('latitude').value = e.latlng.lat;
+            document.getElementById('longitude').value = e.latlng.lng;
+        });
+
+        // Fetch alert types
+        fetch('/api/get-alert-types/')
+            .then(response => response.json())
+            .then(data => {
+                var alertTypeSelect = document.getElementById('alert_type');
+                data.alert_types.forEach(alert => {
+                    var option = document.createElement('option');
+                    option.value = alert.id;
+                    option.textContent = alert.name;
+                    alertTypeSelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching alert types:', error);
+            });
+        
+        // Collection points data
+        const collectionPoints = [
+            {"lat": 12.9716, "lng": 77.5946, "name": "Bangalore city"},
+            {"lat": 13.0273, "lng": 77.6224, "name": "Koramangala"},
+            {"lat": 12.9344, "lng": 77.6394, "name": "BTM"},
+            {"lat": 12.9854, "lng": 77.7044, "name": "Marathahalli"},
+            {"lat": 13.0457, "lng": 77.6514, "name": "Indiranagar"}
+        ];
+
+        // Add collection points to the map
+        collectionPoints.forEach(point => {
+            const circle = L.circleMarker([point.lat, point.lng], {
+                radius: 8,
+                fillColor: '#2196F3',
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+            
+            circle.bindPopup(`<b>Collection Point:</b> ${point.name}`);
+        });
+
+        function drawRoute(route) {
+            const layers = [];
+            
+            // Draw path segments
+            for (let i = 1; i < route.length; i++) {
+                const point = route[i];
+                if (point.path && point.path.length > 0) {
+                    // Get the segment type based on the current point
+                    const segmentType = point.type;
+                    
+                    // Draw the road path
+                    const pathLayer = L.polyline(point.path.map(p => [p.lat, p.lng]), {
+                        color: getRouteColor(segmentType),
+                        weight: 4,
+                        opacity: 0.8,
+                        dashArray: segmentType === 'collection_point' ? '10, 10' : null
+                    }).addTo(map);
+                    
+                    layers.push(pathLayer);
+                }
+            }
+            
+            // Draw markers
+            route.forEach(point => {
+                const marker = L.marker([point.lat, point.lng], {
+                    icon: getMarkerIcon(point.type)
+                });
+                
+                // Add popup with info
+                let popupContent = '';
+                if (point.type === 'vehicle_start') {
+                    popupContent = 'Vehicle Start Location';
+                } else if (point.type === 'alert') {
+                    popupContent = `Alert: ${point.alert_type}`;
+                } else if (point.type === 'collection_point') {
+                    popupContent = 'Collection Point';
+                }
+                
+                if (point.instructions && point.instructions.length > 0) {
+                    popupContent += '<br><br>Instructions:<br>' + 
+                        point.instructions.join('<br>');
+                }
+                
+                marker.bindPopup(popupContent);
+                marker.addTo(map);
+                layers.push(marker);
+            });
+            
+            // Fit map bounds to show entire route
+            if (layers.length > 0) {
+                const group = new L.featureGroup(layers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
+            
+            return layers;
+        }
+
+        function getRouteColor(type) {
+            switch(type) {
+                case 'vehicle_start':
+                    return '#4CAF50';  // Green
+                case 'alert':
+                    return '#2196F3';  // Blue
+                case 'collection_point':
+                    return '#FFC107';  // Amber
+                default:
+                    return '#757575';  // Grey
+            }
+        }
+
+        function getMarkerIcon(type) {
+            if (type === 'vehicle_start') {
+                return vehicleIcon;
+            } else if (type === 'alert') {
+                return alertIcon;
+            } else if (type === 'collection_point') {
+                return collectionPointIcon;
+            }
+        }
+
+        // Handle alert form submission
+        document.getElementById('alertForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var latitude = document.getElementById('latitude').value;
+            var longitude = document.getElementById('longitude').value;
+
+            if (!latitude || !longitude) {
+                alert('Please select a location on the map before submitting the form.');
+                return;
+            }
+
+            var alertType = document.getElementById('alert_type').value;
+            var token = document.getElementById('token').value;
+
+            fetch('/api/user-alert/', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    token: token,
+                    alert_type: alertType,
+                    latitude: latitude,
+                    longitude: longitude
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateLocations(); // Refresh the map
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        });
+        
+        updateLocations(); // Initial update
+
+        // Set up periodic updates
+        setInterval(updateLocations, LOCATION_UPDATE_INTERVAL);
+
+        // If a route is being shown, update it periodically
+        setInterval(() => {
+            const activeVehicleRoute = document.querySelector('.active-route');
+            if (activeVehicleRoute) {
+                const vehicleId = activeVehicleRoute.dataset.vehicleId;
+                if (vehicleId) {
+                    showVehicleRoute(vehicleId);
+                }
+            }
+        }, ROUTE_UPDATE_INTERVAL);
+    </script>
+</body>
+</html>
