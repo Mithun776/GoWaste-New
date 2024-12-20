@@ -261,7 +261,7 @@ export default function Details() {
                     </View>
                 </View>
 
-                <View style={styles.inputContainer}>
+                {/* <View style={styles.inputContainer}>
                     <Text style={styles.label}>Description</Text>
                     <TextInput
                         placeholder='Enter description'
@@ -272,7 +272,7 @@ export default function Details() {
                         onChangeText={(text) => handleInputChange('description', text)}
                         textAlignVertical="top"
                     />
-                </View>
+                </View> */}
 
                 <View style={styles.imageSection}>
                     <Text style={styles.label}>Add Photo</Text>
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
         marginBottom: 15,
     },
     placeholderContainer: {
-        height: 200,
+        height: 130,
         backgroundColor: '#f5f5f5',
         borderRadius: 8,
         justifyContent: 'center',
@@ -434,7 +434,7 @@ const styles = StyleSheet.create({
     },
     previewImage: {
         width: '100%',
-        height: 200,
+        height: 130,
         borderRadius: 8,
         resizeMode: 'cover',
     },
