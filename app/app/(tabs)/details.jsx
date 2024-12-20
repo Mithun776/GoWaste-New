@@ -15,7 +15,13 @@ export default function Details() {
         latitude: null,
         longitude: null,
     });
-    const [alertTypes, setAlertTypes] = useState([]);
+    const [alertTypes, setAlertTypes] = useState([
+        { id: 0, name: 'House' },
+        { id: 1, name: 'Dump Site' },
+        { id: 2, name: 'Electronic' },
+        { id: 3, name: 'Medical' },
+        { id: 4, name: 'Other' },
+    ]);
     const [image, setImage] = useState(null);
     const [loading, setLoading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
@@ -29,13 +35,16 @@ export default function Details() {
     const fetchAlertTypes = async () => {
         try {
             const response = await fetch(`${BACKEND_URL}/api/get-alert-types/`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch alert types');
+            }
             const data = await response.json();
-            if (data.status === 'success') {
-                setAlertTypes(data.data);
+            if (data && Array.isArray(data)) {
+                setAlertTypes(data);
             }
         } catch (error) {
             console.error('Error fetching alert types:', error);
-            Alert.alert('Error', 'Failed to fetch waste types. Please try again.');
+            // Keep using the default alert types if fetch fails
         }
     };
 
@@ -64,7 +73,7 @@ export default function Details() {
 
             const location = await Location.getCurrentPositionAsync({});
             const { latitude, longitude } = location.coords;
-            
+
             // Get address from coordinates
             const [address] = await Location.reverseGeocodeAsync({
                 latitude,
@@ -192,7 +201,7 @@ export default function Details() {
 
     return (
         <View style={styles.mainContainer}>
-            <ScrollView 
+            <ScrollView
                 style={styles.container}
                 showsVerticalScrollIndicator={true}
                 contentContainerStyle={styles.scrollContent}
@@ -202,7 +211,7 @@ export default function Details() {
                 <View style={styles.inputContainer}>
                     <Text style={styles.label}>Location *</Text>
                     <View style={styles.locationContainer}>
-                        <ScrollView 
+                        <ScrollView
                             horizontal={true}
                             showsHorizontalScrollIndicator={true}
                             style={styles.locationInputContainer}
@@ -215,7 +224,7 @@ export default function Details() {
                                 multiline={false}
                             />
                         </ScrollView>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.locationButton}
                             onPress={getCurrentLocation}
                             disabled={locationLoading}
@@ -241,8 +250,12 @@ export default function Details() {
                             onValueChange={(itemValue) => handleInputChange('wasteType', itemValue)}
                         >
                             <Picker.Item label="Select Waste Type" value="" />
-                            {alertTypes.map((type, index) => (
-                                <Picker.Item key={index} label={type.name} value={type.id} />
+                            {alertTypes.map((type) => (
+                                <Picker.Item
+                                    key={type.id}
+                                    label={type.name}
+                                    value={type.id}
+                                />
                             ))}
                         </Picker>
                     </View>
@@ -273,10 +286,10 @@ export default function Details() {
                             </View>
                         )}
                     </View>
-                    
+
                     <View style={styles.imageButtonContainer}>
-                        <TouchableOpacity 
-                            style={styles.imageButton} 
+                        <TouchableOpacity
+                            style={styles.imageButton}
                             onPress={openCameraAsync}
                         >
                             <View style={styles.buttonContent}>
@@ -284,8 +297,8 @@ export default function Details() {
                                 <Text style={styles.buttonText}>Camera</Text>
                             </View>
                         </TouchableOpacity>
-                        <TouchableOpacity 
-                            style={styles.imageButton} 
+                        <TouchableOpacity
+                            style={styles.imageButton}
                             onPress={openImagePickerAsync}
                         >
                             <View style={styles.buttonContent}>
@@ -296,7 +309,7 @@ export default function Details() {
                     </View>
                 </View>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.submitButton, loading && styles.submitButtonDisabled]}
                     onPress={handleSubmit}
                     disabled={loading}
