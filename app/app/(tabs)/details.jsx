@@ -34,17 +34,40 @@ export default function Details() {
 
     const fetchAlertTypes = async () => {
         try {
-            const response = await fetch(`${BACKEND_URL}/api/get-alert-types/`);
+            console.log('Fetching alert types from:', `${BACKEND_URL}/api/get-alert-types/`);
+            const response = await fetch(`${BACKEND_URL}/api/get-alert-types/`, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+            });
+
             if (!response.ok) {
-                throw new Error('Failed to fetch alert types');
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
+
             const data = await response.json();
+            console.log('Received alert types:', data);
+
             if (data && Array.isArray(data)) {
                 setAlertTypes(data);
+            } else if (data && data.choices) {
+                // Handle if the API returns choices in a different format
+                const formattedTypes = data.choices.map(choice => ({
+                    id: choice.value,
+                    name: choice.label
+                }));
+                setAlertTypes(formattedTypes);
             }
         } catch (error) {
             console.error('Error fetching alert types:', error);
             // Keep using the default alert types if fetch fails
+            Alert.alert(
+                'Connection Error',
+                'Could not connect to the server. Using default waste types.',
+                [{ text: 'OK' }]
+            );
         }
     };
 
@@ -102,62 +125,78 @@ export default function Details() {
     };
 
     const handleSubmit = async () => {
-        if (!formData.latitude || !formData.longitude) {
-            Alert.alert('Error', 'Please get your current location first');
-            return;
-        }
-
-        if (!formData.wasteType) {
-            Alert.alert('Error', 'Please select a waste type');
-            return;
-        }
-
-        setLoading(true);
         try {
-            // Create form data for image upload
+            // Validate required fields
+            if (!formData.location || !formData.wasteType || !formData.latitude || !formData.longitude) {
+                Alert.alert('Error', 'Please fill in all required fields and get location');
+                return;
+            }
+
+            if (!image) {
+                Alert.alert('Error', 'Please select an image');
+                return;
+            }
+
+            setLoading(true);
+
+            // Create form data for multipart/form-data request
             const formDataToSend = new FormData();
+            formDataToSend.append('alert_type', formData.wasteType);
             formDataToSend.append('latitude', formData.latitude);
             formDataToSend.append('longitude', formData.longitude);
-            formDataToSend.append('alert_type', formData.wasteType);
-            formDataToSend.append('description', formData.description || '');
+            formDataToSend.append('description', formData.description);
 
-            if (image) {
-                const imageFileName = image.split('/').pop();
-                const match = /\.(\w+)$/.exec(imageFileName);
-                const imageType = match ? `image/${match[1]}` : 'image';
-                formDataToSend.append('image', {
-                    uri: image,
-                    name: imageFileName,
-                    type: imageType,
-                });
-            }
-
-            const response = await fetch(`${BACKEND_URL}/api/user-alert/`, {
-                method: 'POST',
-                body: formDataToSend,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
+            // Append image
+            const imageFileName = image.split('/').pop();
+            const match = /\.(\w+)$/.exec(imageFileName);
+            const imageType = match ? `image/${match[1]}` : 'image';
+            formDataToSend.append('image', {
+                uri: image,
+                name: imageFileName,
+                type: imageType
             });
 
-            const data = await response.json();
-            if (data.status === 'success') {
-                Alert.alert('Success', 'Waste alert reported successfully!');
-                // Reset form
-                setFormData({
-                    location: '',
-                    wasteType: '',
-                    description: '',
-                    latitude: null,
-                    longitude: null,
-                });
-                setImage(null);
-            } else {
-                throw new Error(data.message || 'Failed to report waste alert');
+            console.log('Submitting alert to:', `${BACKEND_URL}/api/user-alert/`);
+            const response = await fetch(`${BACKEND_URL}/api/user-alert/`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'multipart/form-data',
+                },
+                body: formDataToSend
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to submit alert');
             }
+
+            const data = await response.json();
+            console.log('Alert submitted successfully:', data);
+
+            // Reset form after successful submission
+            setFormData({
+                location: '',
+                wasteType: '',
+                description: '',
+                latitude: null,
+                longitude: null,
+            });
+            setImage(null);
+
+            Alert.alert(
+                'Success',
+                'Alert submitted successfully!',
+                [{ text: 'OK' }]
+            );
+
         } catch (error) {
             console.error('Error submitting alert:', error);
-            Alert.alert('Error', 'Failed to report waste alert. Please try again.');
+            Alert.alert(
+                'Error',
+                'Failed to submit alert. Please try again.',
+                [{ text: 'OK' }]
+            );
         } finally {
             setLoading(false);
         }
