@@ -1,6 +1,6 @@
 # GoWaste
 
-A comprehensive waste management solution with separate frontend and backend components.
+A comprehensive waste management solution with separate frontend and backend components
 
 ## Repository Structure
 
