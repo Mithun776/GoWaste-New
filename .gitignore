@@ -11,6 +11,8 @@ App/*.orig.*
 App/web-build/
 
 Backend/.venv/
+Backend/.vscode/
+Backend/.pytest_cache/
 Backend/.env
 # macOS
 .DS_Store

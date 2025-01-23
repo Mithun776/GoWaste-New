@@ -1,4 +1,4 @@
-from django.shortcuts import render, HttpResponse
+from django.shortcuts import render, HttpResponse, redirect
 from django.http.response import HttpResponseNotAllowed, HttpResponseNotFound
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -50,13 +50,21 @@ def root(request, type = None):
             'response': 'Status OK',
         },
         'user-alert': {
-            'method': 'PUT',
+            'method': 'POST',
             'body': {
                 'token': 'string',
                 'latitude': 'decimal/float',
                 'longitude': 'decimal/float'
             },
             'response': 'Status OK',
+        },
+        'delete-user-alert': {
+            'method': 'POST',
+            'body': {
+                'token': 'string',
+                'alert_id': 'int'
+            },
+            'response': 'Alert Deleted',
         },
         'get-alert-types': {
             'method': 'GET',
@@ -578,8 +586,11 @@ def json_response(message: str, data: any, optional: any = None) -> str:
 def register_vehicle(request):
     if request.method != 'POST':
         return HttpResponseNotAllowed(permitted_methods=["POST"])
-    vehicle = VehicleLocation()
+    
     body = json.loads(request.body)
+    vehicle = VehicleLocation.objects.get(vehicle_registration = body.get("registration"))
+    if not vehicle:
+        vehicle = VehicleLocation()
     vehicle.vehicle_registration = body.get("registration")
     vehicle.latitude = body.get("latitude")
     vehicle.longitude = body.get("longitude")
@@ -644,7 +655,7 @@ def update_vehicle(request):
     vehicle.longitude = body.get("longitude")
     vehicle.save()
     record.save()
-    return json_response("Location Updated.", "OK", [vehicle.id, vehicle.latitude, vehicle.longitude])
+    return redirect("get-vehicle-route", vehicle.id)
 
 def get_alert_types(request):
     if request.method != 'GET':
@@ -662,9 +673,9 @@ def get_alert_types(request):
 
 @csrf_exempt
 def user_alert(request):
-    if request.method != 'PUT':
-        return HttpResponseNotAllowed(permitted_methods=["PUT"])
-    body = json.loads(request.body)
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(permitted_methods=["POST"])
+    body = request.POST
 
     token = body.get("token")
     try:
@@ -699,6 +710,52 @@ def user_alert(request):
     assign_alerts_to_vehicles()
 
     return json_response("Location Updated.", "OK", [alert.id, alert.get_alert_type_display(), alert.latitude, alert.longitude])
+
+@csrf_exempt
+def delete_user_alert(request):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(permitted_methods=["POST"])
+    body = json.loads(request.body)
+    print(body)
+
+    token = body.get("token")
+    alert_id = body.get("alert_id")
+
+    # Validate input
+    if not token or not alert_id:
+        return json_response("Error occurred", 'Missing token or alert_id')
+
+    try:
+        dec_data = json.loads(decrypt(token))
+    except Exception as e:
+        print("ERROR:", e)
+        return json_response("Error occurred", 'Invalid token')
+    
+    if 'id' not in dec_data or 'phone_num' not in dec_data:
+        return json_response("Error occurred", 'Invalid token')
+    
+    try:
+        user = User.objects.get(id=dec_data['id'])
+        if dec_data['phone_num'] != user.phone_num:
+            print(dec_data['phone_num'], user.phone_num, sep="\n")
+            return json_response("Error occurred", 'User data mismatch')
+
+        # Find the alert
+        try:
+            alert = Alerts.objects.get(id=alert_id, user=user)
+        except Alerts.DoesNotExist:
+            return json_response("Error occurred", 'Alert not found or not owned by user')
+
+        # Delete the alert
+        alert.delete()
+
+        return json_response("Success", "Alert Deleted Successfully.", [alert_id])
+
+    except User.DoesNotExist:
+        return json_response("Error occurred", 'User not found')
+    except Exception as e:
+        print("ERROR:", e)
+        return json_response("Error occurred", 'Deletion failed')
 
 def get_status(request):
     if request.method != 'GET':

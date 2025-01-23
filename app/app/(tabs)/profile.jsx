@@ -1,8 +1,9 @@
-import { View, Text, Image, FlatList, TouchableOpacity } from 'react-native'
+import { View, Text, Image, FlatList, TouchableOpacity, Alert } from 'react-native'
 import React from 'react'
 import Colors from '../utils/Colors';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 
 export default function Profile() {
 
@@ -35,8 +36,18 @@ export default function Profile() {
         }
     ]
 
-    const onPressMenu = (menu) => {
-        if (menu == 'logout') {
+    const onPressMenu = async (menu) => {
+        if (menu.name.toLowerCase() === 'logout') {
+            try {
+                // Remove the stored token
+                await SecureStore.deleteItemAsync('user_token');
+                
+                // Navigate to sign-up page
+                router.replace('/auth/sign-up');
+            } catch (error) {
+                Alert.alert('Logout Error', 'Unable to logout. Please try again.');
+                console.error('Logout error:', error);
+            }
             return;
         }
 

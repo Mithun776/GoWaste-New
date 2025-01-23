@@ -1,9 +1,10 @@
 import { View, Text, TextInput, Image, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Colors from '../utils/Colors';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
 import { BACKEND_URL } from '../utils/Constants';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -25,11 +26,16 @@ export default function Details() {
     const [image, setImage] = useState(null);
     const [loading, setLoading] = useState(false);
     const [locationLoading, setLocationLoading] = useState(false);
+    const [selectedAlert, setSelectedAlert] = useState(null);
 
-    // Fetch alert types from backend
+    // Fetch alert types from backend and get current location
     useEffect(() => {
-        fetchAlertTypes();
-        requestLocationPermission();
+        const initPage = async () => {
+            await fetchAlertTypes();
+            await getCurrentLocation();
+        };
+
+        initPage();
     }, []);
 
     const fetchAlertTypes = async () => {
@@ -51,7 +57,7 @@ export default function Details() {
             console.log('Received alert types:', data);
 
             if (data && Array.isArray(data)) {
-                setAlertTypes(data);
+            setAlertTypes(data);
             } else if (data && data.choices) {
                 // Handle if the API returns choices in a different format
                 const formattedTypes = data.choices.map(choice => ({
@@ -118,6 +124,14 @@ export default function Details() {
     };
 
     const handleInputChange = (fieldName, fieldValue) => {
+        // Log input changes, especially for waste type
+        if (fieldName === 'wasteType') {
+            console.log('Waste Type Selected:', {
+                value: fieldValue,
+                alertTypes: alertTypes
+            });
+        }
+
         setFormData(prev => ({
             ...prev,
             [fieldName]: fieldValue
@@ -126,37 +140,66 @@ export default function Details() {
 
     const handleSubmit = async () => {
         try {
-            // Validate required fields
-            if (!formData.location || !formData.wasteType || !formData.latitude || !formData.longitude) {
-                Alert.alert('Error', 'Please fill in all required fields and get location');
-                return;
-            }
+            // Debug logging
+            console.log('Form Data:', {
+                wasteType: formData.wasteType,
+                latitude: formData.latitude,
+                longitude: formData.longitude
+            });
 
-            if (!image) {
-                Alert.alert('Error', 'Please select an image');
+            // More robust validation
+            const isWasteTypeValid = formData.wasteType !== '' && formData.wasteType !== null;
+            const isLocationValid = formData.latitude !== null && formData.longitude !== null;
+
+            if (!isWasteTypeValid || !isLocationValid) {
+                // Detailed error message
+                let errorMessage = 'Please ';
+                const errors = [];
+                
+                if (!isWasteTypeValid) {
+                    errors.push('select a valid waste type');
+                }
+                
+                if (!isLocationValid) {
+                    errors.push('ensure location is available');
+                }
+
+                errorMessage += errors.join(' and ');
+
+                Alert.alert('Error', errorMessage);
                 return;
             }
 
             setLoading(true);
 
-            // Create form data for multipart/form-data request
+            // Retrieve the token from secure store
+            const token = await SecureStore.getItemAsync('user_token');
+
+            // Create form data
             const formDataToSend = new FormData();
+            
+            // Add all text fields
+            formDataToSend.append('token', token);
             formDataToSend.append('alert_type', formData.wasteType);
             formDataToSend.append('latitude', formData.latitude);
             formDataToSend.append('longitude', formData.longitude);
-            formDataToSend.append('description', formData.description);
+            formDataToSend.append('description', formData.description || '');
 
-            // Append image
-            const imageFileName = image.split('/').pop();
-            const match = /\.(\w+)$/.exec(imageFileName);
-            const imageType = match ? `image/${match[1]}` : 'image';
-            formDataToSend.append('image', {
-                uri: image,
-                name: imageFileName,
-                type: imageType
-            });
+            // Add image if available
+            if (image) {
+                const imageFileName = image.split('/').pop();
+                const match = /\.(\w+)$/.exec(imageFileName);
+                const imageType = match ? `image/${match[1]}` : 'image';
+                formDataToSend.append('image', {
+                    uri: image,
+                    name: imageFileName,
+                    type: imageType
+                });
+            }
 
             console.log('Submitting alert to:', `${BACKEND_URL}/api/user-alert/`);
+            console.log('Form data:', Object.fromEntries(formDataToSend));
+
             const response = await fetch(`${BACKEND_URL}/api/user-alert/`, {
                 method: 'POST',
                 headers: {
@@ -166,13 +209,29 @@ export default function Details() {
                 body: formDataToSend
             });
 
+            // Log the raw response
+            const responseText = await response.text();
+            console.log('Raw response:', responseText);
+
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to submit alert');
+                throw new Error(`HTTP error! status: ${response.status}, response: ${responseText}`);
             }
 
-            const data = await response.json();
+            // Try to parse JSON, but handle potential parsing errors
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseError) {
+                console.error('JSON parsing error:', parseError);
+                throw new Error(`Failed to parse response: ${responseText}`);
+            }
+
             console.log('Alert submitted successfully:', data);
+
+            // Set the current alert ID for potential deletion
+            if (data && data.alert_id) {
+                setSelectedAlert(data);
+            }
 
             // Reset form after successful submission
             setFormData({
@@ -194,7 +253,92 @@ export default function Details() {
             console.error('Error submitting alert:', error);
             Alert.alert(
                 'Error',
-                'Failed to submit alert. Please try again.',
+                error.message || 'Failed to submit alert. Please try again.',
+                [{ text: 'OK' }]
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteAlert = async () => {
+        // Check if there's a selected alert to delete
+        if (!selectedAlert) {
+            Alert.alert('No Alert Selected', 'Please select an alert to delete from the map.');
+            return;
+        }
+
+        try {
+            // Confirm deletion
+            const confirmDelete = await new Promise((resolve) => {
+                Alert.alert(
+                    'Confirm Deletion',
+                    'Are you sure you want to delete this alert?',
+                    [
+                        {
+                            text: 'Cancel',
+                            onPress: () => resolve(false),
+                            style: 'cancel'
+                        },
+                        {
+                            text: 'Delete',
+                            onPress: () => resolve(true),
+                            style: 'destructive'
+                        }
+                    ]
+                );
+            });
+
+            // Exit if not confirmed
+            if (!confirmDelete) return;
+
+            // Start loading
+            setLoading(true);
+
+            // Retrieve the token from secure store
+            const token = await SecureStore.getItemAsync('user_token');
+
+            console.log('Token:', token);
+            console.log('Alert ID:', selectedAlert.id);
+            console.log("-------------------------------------------------------------" + `${BACKEND_URL}/api/delete-user-alert/`);
+
+            // Prepare delete request
+            const response = await fetch(`${BACKEND_URL}/api/delete-user-alert/`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    token: token,
+                    alert_id: selectedAlert.id
+                })
+            });
+
+            // Parse response
+            const data = await response.json();
+
+            // Check if response was successful
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to delete alert');
+            }
+
+            // Show success message from response
+            Alert.alert(
+                data.message || 'Success', // Use data.message as title
+                data.data || 'Alert deleted successfully!', // Use data.data as message
+                [{ text: 'OK' }]
+            );
+
+            // Reset selected alert
+            setSelectedAlert(null);
+
+            console.log('Alert deleted successfully:', data);
+        } catch (error) {
+            console.error('Error deleting alert:', error);
+            Alert.alert(
+                'Error',
+                error.message || 'Failed to delete alert. Please try again.',
                 [{ text: 'OK' }]
             );
         } finally {
@@ -286,14 +430,20 @@ export default function Details() {
                         <Picker
                             selectedValue={formData.wasteType}
                             style={styles.input}
-                            onValueChange={(itemValue) => handleInputChange('wasteType', itemValue)}
+                            onValueChange={(itemValue) => {
+                                console.log('Picker Value Changed:', {
+                                    itemValue,
+                                    alertTypes
+                                });
+                                handleInputChange('wasteType', itemValue);
+                            }}
                         >
                             <Picker.Item label="Select Waste Type" value="" />
                             {alertTypes.map((type) => (
                                 <Picker.Item
                                     key={type.id}
                                     label={type.name}
-                                    value={type.id}
+                                    value={type.id.toString()} // Ensure value is a string
                                 />
                             ))}
                         </Picker>

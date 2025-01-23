@@ -1,8 +1,11 @@
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Alert } from 'react-native';
 import React, { useState, useEffect } from 'react';
 import { useNavigation, useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import Colors from '../../utils/Colors';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import axios from 'axios';
+import { BACKEND_URL } from '../../utils/Constants';
 
 const { width, height } = Dimensions.get('window'); // Get screen width and height
 
@@ -10,19 +13,57 @@ export default function SignUp() {
     const navigation = useNavigation();
     const router = useRouter();
 
-    // State for password visibility toggle
-    const [secureText, setSecureText] = useState(true);
-
-    // Toggle the visibility of the password
-    const toggleSecureText = () => {
-        setSecureText(prevState => !prevState);
-    };
+    // State for form inputs
+    const [username, setUsername] = useState('');
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [otp, setOtp] = useState('');
 
     useEffect(() => {
         navigation.setOptions({
             headerShown: false
-        })
-    }, [])
+        });
+
+        // Check for existing token on component mount
+        const checkExistingToken = async () => {
+            try {
+                const token = await SecureStore.getItemAsync('user_token');
+                if (token) {
+                    // If token exists, navigate directly to locate page
+                    router.replace('(tabs)/locate');
+                }
+            } catch (error) {
+                console.error('Error checking token:', error);
+            }
+        };
+
+        checkExistingToken();
+    }, []);
+
+    const handleSignUp = async () => {
+        // Validate inputs
+        if (!phoneNumber) {
+            Alert.alert('Error', 'Please enter a phone number');
+            return;
+        }
+
+        try {
+            const response = await axios.post(`${BACKEND_URL}/api/register-user/`, { 
+                phone: phoneNumber,
+                user_name: username || null
+            });
+
+            // Store the token securely
+            const token = response.data.data.token;
+            console.log(response.data.data);
+            await SecureStore.setItemAsync('user_token', token);
+
+            // Navigate to the next screen or home screen
+            router.replace('(tabs)/locate');
+        } catch (error) {
+            Alert.alert('Registration Failed', error.response?.data?.message || 'Please try again');
+            console.error(error);
+        }
+    };
 
     return (
         <ScrollView contentContainerStyle={styles.scrollViewContainer}>
@@ -35,10 +76,12 @@ export default function SignUp() {
 
                 {/* User Name */}
                 <View style={styles.inputContainer}>
-                    <Text>Username:</Text>
+                    <Text>Username (Optional):</Text>
                     <TextInput
                         style={styles.input}
                         placeholder='Enter your name'
+                        value={username}
+                        onChangeText={setUsername}
                     />
                 </View>
 
@@ -49,57 +92,32 @@ export default function SignUp() {
                         style={styles.input}
                         placeholder='Enter Phone Number'
                         keyboardType="numeric"
+                        value={phoneNumber}
+                        onChangeText={setPhoneNumber}
                     />
                 </View>
 
-                {/* Get OTP */}
-                <TouchableOpacity
-                    // onPress={() => router.replace('auth/sign-up')}   ================ Make something to get OTP ================
-                    style={styles.getOtpButton}>
-                    <Text style={styles.getOtpText}>Get OTP</Text>
-                </TouchableOpacity>
-
-                {/* OTP */}
+                {/* OTP (Placeholder) */}
                 <View style={styles.inputContainer}>
-                    <Text>OTP Received:</Text>
+                    <Text>OTP (Not Active):</Text>
                     <TextInput
                         style={styles.input}
-                        placeholder='Enter OTP'
+                        placeholder='OTP will be implemented later'
                         keyboardType="numeric"
+                        value={otp}
+                        onChangeText={setOtp}
+                        editable={false}
                     />
                 </View>
-
-                {/* Password */}
-                {/* <View style={styles.inputContainer}> */}
-                {/* <Text>Create Password:</Text> */}
-                {/* <TextInput */}
-                {/* secureTextEntry={secureText} // Toggles visibility based on state */}
-                {/* style={styles.input} */}
-                {/* placeholder='Enter Password' */}
-                {/* /> */}
-                {/* Toggle show/hide password */}
-                {/* <TouchableOpacity onPress={toggleSecureText} style={styles.toggleButton}> */}
-                {/* <Text style={styles.toggleText}> */}
-                {/* {secureText ? 'Show Password' : 'Hide Password'} */}
-                {/* </Text> */}
-                {/* </TouchableOpacity> */}
-                {/* </View> */}
 
                 {/* Buttons Row - Create Account & Sign In */}
                 <View style={styles.buttonsContainer}>
                     {/* Create Account Button */}
                     <TouchableOpacity
-                        onPress={() => router.replace('(tabs)/locate')}
+                        onPress={handleSignUp}
                         style={styles.createAccountButton}>
                         <Text style={styles.buttonText}>Sign in</Text>
                     </TouchableOpacity>
-
-                    {/* Sign In Button */}
-                    {/* <TouchableOpacity
-                        onPress={() => router.replace('auth/sign-in')}
-                        style={styles.signInButton}>
-                        <Text style={styles.signInText}>Sign In</Text>
-                    </TouchableOpacity> */}
                 </View>
             </View>
         </ScrollView>
@@ -139,31 +157,11 @@ const styles = StyleSheet.create({
         marginTop: 5,
         fontSize: width * 0.04, // Dynamic font size for better readability on all screens
     },
-    toggleButton: {
-        marginTop: 3,
-        alignItems: 'flex-end',
-    },
-    toggleText: {
-        color: Colors.GREEN,
-        fontSize: width * 0.04,
-        fontWeight: 'bold',
-    },
-    getOtpButton: {
-        padding: 12,
-        backgroundColor: Colors.LIME,
-        borderRadius: 15,
+    buttonsContainer: {
+        flexDirection: 'row',  // Aligns buttons horizontally
+        justifyContent: 'space-between',  // Distributes buttons on both sides (left and right)
         marginTop: 20,
-        borderWidth: 1,
     },
-    getOtpText: {
-        color: Colors.BLACK,
-        textAlign: 'center',
-    },
-    // buttonsContainer: {
-    //     flexDirection: 'row',  // Aligns buttons horizontally
-    //     justifyContent: 'space-between',  // Distributes buttons on both sides (left and right)
-    //     marginTop: 20,
-    // },
     createAccountButton: {
         padding: 15,
         backgroundColor: Colors.PRIMARY,
@@ -171,24 +169,10 @@ const styles = StyleSheet.create({
         marginTop: 50,
         marginBottom: 20,  // Allows the button to take up 47% of the available width
     },
-    signInButton: {
-        padding: 10,
-        backgroundColor: Colors.WHITE,
-        borderRadius: 15,
-        flex: 0.47,  // Allows the button to take up 47% of the available width
-        borderWidth: 1,
-    },
     buttonText: {
         color: Colors.WHITE,
         justifyContent: 'center',
         textAlign: 'center',
         fontSize: width * 0.05, // Button text size relative to screen width
-    },
-    signInText: {
-        color: Colors.PRIMARY,
-        justifyContent: 'center',
-        textAlign: 'center',
-        fontSize: width * 0.05,
-        lineHeight: width * 0.05 * 2.0, // Helps with vertical centering the text
     },
 });

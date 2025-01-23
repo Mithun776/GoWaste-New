@@ -8,4 +8,5 @@ export default {
     LIGHTGREY: '#D3D3D3',
     WHITE_TRANSP: '#ffffff87',
     LIGHT_WHITE: '#F4F4F4',
+    RED: '#FF0000',  // Added bright red color
 }
