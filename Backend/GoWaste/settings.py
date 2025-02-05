@@ -56,7 +56,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-CSRF_TRUSTED_ORIGINS = ['https://7htq5jp6-8000.inc1.devtunnels.ms/']
+CSRF_TRUSTED_ORIGINS = ['http://7htq5jp6-8000.inc1.devtunnels.ms']
 ROOT_URLCONF = 'GoWaste.urls'
 
 TEMPLATES = [
@@ -88,7 +88,7 @@ DATABASES = {
         "USER": "postgres",
         "PASSWORD": "postgres",
         "HOST": "127.0.0.1",
-        "PORT": "5432",
+        "PORT": "5433",
     }
 }
 

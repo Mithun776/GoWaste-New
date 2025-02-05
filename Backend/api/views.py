@@ -161,8 +161,7 @@ def assign_alerts_to_vehicles() -> Dict[int, List[int]]:
         # Get all unassigned active alerts
         alerts = list(Alerts.objects.filter(
             is_active=True,
-            is_completed=False,
-            vehicleassignment__isnull=True  # Only get alerts not assigned to any vehicle
+            is_completed=False
         ))
         
         if not alerts:
@@ -171,7 +170,7 @@ def assign_alerts_to_vehicles() -> Dict[int, List[int]]:
             route_opt.save()
             return {}
             
-        print(f"[DEBUG] Found {len(alerts)} unassigned alerts and {len(vehicles)} vehicles")
+        print(f"[DEBUG] Found {len(alerts)} alerts and {len(vehicles)} vehicles")
         
         # Convert coordinates to numpy arrays for vectorized operations
         vehicle_coords = np.array([[float(v.latitude), float(v.longitude)] for v in vehicles])
@@ -304,7 +303,7 @@ def optimize_route(vehicle_id: int, alert_ids: List[int] = None) -> List[Dict]:
         if not alert_ids:
             return []
         
-        alerts = list(Alerts.objects.filter(id__in=alert_ids))
+        alerts = list(Alerts.objects.filter(id__in=alert_ids, is_active=True, is_completed=False))
         
         # Start with vehicle location
         current_lat = float(vehicle.latitude)
@@ -588,14 +587,20 @@ def register_vehicle(request):
         return HttpResponseNotAllowed(permitted_methods=["POST"])
     
     body = json.loads(request.body)
-    vehicle = VehicleLocation.objects.get(vehicle_registration = body.get("registration"))
-    if not vehicle:
+    try:
+        vehicle = VehicleLocation.objects.get(vehicle_registration = body.get("registration")) or None
+    except VehicleLocation.DoesNotExist:
         vehicle = VehicleLocation()
     vehicle.vehicle_registration = body.get("registration")
     vehicle.latitude = body.get("latitude")
     vehicle.longitude = body.get("longitude")
     vehicle.save()
     vehicle.refresh_from_db()
+    
+    # Trigger route recalculation after new vehicle registration
+    print("[DEBUG] Triggering route recalculation after new vehicle registration")
+    assign_alerts_to_vehicles()
+
     data = json.dumps({
         'id': vehicle.id,
         'reg_no': vehicle.vehicle_registration
@@ -629,6 +634,18 @@ def register_user(request):
     enc_data = encrypt(data)
     return json_response("User is registered.", {'token':enc_data} )
 
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth's radius in kilometers
+
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    distance = R * c
+
+    return distance
 @csrf_exempt
 def update_vehicle(request):
     if request.method != 'PUT':
@@ -655,6 +672,22 @@ def update_vehicle(request):
     vehicle.longitude = body.get("longitude")
     vehicle.save()
     record.save()
+
+    PROXIMITY_THRESHOLD = 0.1  # 100 meters in kilometers
+    
+    nearby_alerts = Alerts.objects.filter(is_active=True, is_completed=False)
+    for alert in nearby_alerts:
+        distance = calculate_distance(
+            vehicle.latitude, 
+            vehicle.longitude,
+            alert.latitude,
+            alert.longitude
+        )
+        if distance <= PROXIMITY_THRESHOLD:
+            alert.is_completed = True
+            alert.is_active = False
+            alert.save()
+
     return redirect("get-vehicle-route", vehicle.id)
 
 def get_alert_types(request):
@@ -780,7 +813,7 @@ def get_status(request):
         } for vehicle in vehicles
     ]
     
-    alerts = Alerts.objects.all()
+    alerts = Alerts.objects.filter(is_active=True, is_completed=False)
     alert_data = [
         {
             'id': alert.id,
